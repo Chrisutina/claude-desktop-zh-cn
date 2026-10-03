@@ -130,14 +130,12 @@ function Read-InteractiveSelection {
     Write-Host "[1] 标准汉化    不修改 app.asar / Claude.exe，保留 Claude 签名"
     Write-Host "    · 菜单栏、托盘、系统对话框、应用内界面：中文"
     Write-Host "    · Cowork 沙箱/工作区：可能可用（还需系统本身支持 Hyper-V，见 README）"
-    Write-Host "    · 不含：在线页面汉化、模型选择器汉化、第三方模型名校验绕过"
-    Write-Host "    · 用第三方 API 时需在网关或 CC Switch 中把模型名映射为"
-    Write-Host "      Claude / Anthropic 风格名称，否则推理配置无法保存"
+    Write-Host "    · 不含在线页面和模型选择器补丁；官方订阅在线界面请选择 [2]"
     Write-Host ""
     Write-Host "[2] 官方账号登录模式（完整汉化）    改写 app.asar 并重算 Claude.exe 内嵌完整性哈希"
-    Write-Host "    · 在 [1] 基础上额外汉化在线页面、主进程菜单、模型选择器，"
-    Write-Host "      并绕过第三方模型名校验"
-    Write-Host "    · Cowork 沙箱/工作区：必不可用（签名失效）"
+    Write-Host "    · 在 [1] 基础上额外汉化在线页面、主进程菜单、模型选择器"
+    Write-Host "    · 适用于 Claude 官方订阅账号登录，无需配置第三方 API"
+    Write-Host "    · EXE 签名校验变为 HashMismatch，Cowork 服务可能拒绝连接"
     Write-Host ""
     Write-Host "[3] Frida 运行时汉化（实验中，有问题请反馈，不保证成功）"
     Write-Host "[4] 恢复原样 / 卸载补丁"
@@ -339,8 +337,8 @@ function Write-MultipleClaudeFailureHint {
 function Write-AsarCoworkSignatureWarning {
     Write-Host ""
     Write-Host "[重要] 当前选择会修改 app.asar，并同步改写 Claude.exe 内嵌的 asar 完整性哈希。" -ForegroundColor Yellow
-    Write-Host "[重要] 这会让 Claude.exe 的 Authenticode 签名变为 HashMismatch；Cowork VM 服务会拒绝未通过签名验证的客户端。" -ForegroundColor Yellow
-    Write-Host "[重要] 如果需要 Cowork/截图工作区，请改用模式 1，并在第三方网关或 ccswitch 中把 claude/anthropic 风格模型名映射到实际模型。" -ForegroundColor Yellow
+    Write-Host "[重要] 这会让 Claude.exe 的 Authenticode 签名变为 HashMismatch；Cowork VM 服务可能拒绝未通过签名验证的客户端。" -ForegroundColor Yellow
+    Write-Host "[重要] 如果需要保留签名或使用 Cowork，请改用模式 1；该模式不包含在线页面翻译。" -ForegroundColor Yellow
     Write-Host ""
 }
 
@@ -3917,7 +3915,7 @@ function Install-WindowsLanguagePack {
         if ($PatchMode -eq "safe") {
             Write-Host "  标准汉化：不修改 app.asar / Claude.exe，保留 Claude 签名。" -ForegroundColor Green
         } else {
-            Write-Host "  完整汉化：改写 app.asar 并重算 Claude.exe 完整性哈希；Cowork 沙箱/工作区将不可用。" -ForegroundColor Yellow
+            Write-Host "  官方账号登录模式：改写 app.asar 并重算 Claude.exe 完整性哈希；Cowork 服务可能拒绝连接。" -ForegroundColor Yellow
         }
 
         Write-Step "[2/8] 检查语言资源"

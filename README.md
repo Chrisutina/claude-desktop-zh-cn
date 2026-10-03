@@ -1,222 +1,99 @@
-# Claude Desktop 中文补丁
+# Claude Desktop 简体中文补丁（Windows）
 
-给 Claude Desktop 换上简体中文界面。支持 Windows 和 macOS，支持官方订阅和第三方 API，可完整卸载恢复原样。
+**源码修复版 1.4.11 · 更新日期：2026-10-03 · 核对客户端：Claude Desktop 2.19675.0**
 
-本轮更新针对 **Windows、简体中文、官方订阅账号登录**：补齐 Chrome 设置和订阅用量页，修复动态时间、百分比及词表大小写匹配，并保留思考等级的英文名称。安装不需要配置第三方 API。
+本轮维护范围为 **Windows、简体中文、Claude 官方订阅账号登录**。使用 Claude 账号登录即可，安装本补丁无需配置第三方 API。
 
-**[下载当前修复源码 ZIP](https://github.com/Chrisutina/claude-desktop-zh-cn/archive/refs/heads/main.zip)**，解压后运行 `install-windows.bat`，选择 **2：官方账号登录模式（完整汉化）→ 1：简体中文**。重新安装后才会载入新词库，仅重启已有应用不会更新补丁。
+**[下载当前源码 ZIP](https://github.com/Chrisutina/claude-desktop-zh-cn/archive/refs/heads/main.zip)**，完整解压后运行 `install-windows.bat`，依次选择 **2：官方账号登录模式（完整汉化）→ 1：简体中文**。
 
-补丁修改本机界面资源和语言配置，不修改 Claude 服务端账号数据，也不改变推理请求内容。模式 `[2]` 还会改写应用文件及其完整性哈希，详见下文。
+1.4.11 是当前源码包的版本，与 `resources/release.json` 一致；本仓库目前尚未发布对应的 GitHub Release，下载入口为 `main` 分支源码包。Claude Desktop 的版本号与补丁版本号分别记录。
 
-## 界面截图
+## 1.4.11 更新内容
 
-![Claude Desktop 中文主界面](docs/images/claude-desktop-zh-cn-home.png)
-![Claude Desktop 中文设置界面](docs/images/claude-desktop-zh-cn-settings.png)
-![Claude Desktop 中文推理配置界面](docs/images/claude-desktop-zh-cn-gateway.png)
+- 补齐 Chrome 扩展设置、网站权限和默认策略文案，以及订阅用量、额度重置和用量余额页面的文案。
+- 处理运行时生成的百分比、折扣、到期日、星期、12/24 小时重置时间及倒计时。
+- 修复在线词表的大小写匹配，分别保留 `Extensions` 与 `EXTENSIONS`，避免词条被覆盖。
+- 思考等级保留 `Low / Medium / High / Extra / Max`，标题保留 `Effort`；模型说明与帮助文字使用中文。其他语境的低、中、高仍按原意翻译。
+- 补齐右键菜单中的复制链接、复制图片、添加到词典、检查元素等文案；保留拼写建议原文和 Windows 的 `Ctrl+B` 快捷键。
+- 新增模型动态词库，并调整注入顺序，避免后续替换破坏在线词表的英文匹配项。
 
-> 截图取自 Claude Desktop 2.2553.1。Claude 每次更新都可能新增文案，届时需要重跑补丁；更新后如果出现零星英文，见文末「Claude 更新后」。
+[修复细节与验证范围](https://github.com/Chrisutina/claude-desktop-zh-cn/blob/main/docs/windows-official-localization.md)。
 
-## 汉化覆盖
+## 安装与更新补丁
 
-界面翻译使用键值词库、模型动态词库和在线 DOM 映射：
+1. 保存工作，结束 Claude Code 等正在运行的任务，再退出 Claude Desktop。安装脚本会关闭并重新启动应用。
+2. 下载上方源码 ZIP，**完整解压整个文件夹**。已有旧补丁时，也要重新下载当前源码包。
+3. 双击 `install-windows.bat`，按 UAC 提示授予管理员权限。入口会将脚本和词库复制到本机临时目录再运行。
+4. 第一层菜单选择 **2：官方账号登录模式（完整汉化）**。
+5. 语言菜单选择 **1：简体中文**。
+6. 等待安装完成和 Claude 重新打开；若语言未自动切换，在账号菜单的 `Language` 中选择简体中文。
+7. 检查思考等级、输入框右键菜单、Chrome 设置和订阅用量页。
 
-| 界面层 | 随包资源 | 简体词条数 |
-|---|---|---|
-| 应用页面和设置 | `frontend-zh-CN.json` | 31,067 |
-| 菜单、托盘和系统对话框 | `desktop-zh-CN.json` | 823 |
-| 模型说明和思考选项 | `dynamic-zh-CN.json` | 49 |
+**仅重启 Claude 不会写入新词库。** 修改补丁源码或下载新版后，需要重新运行安装入口。需要保留当前任务时，等任务结束再安装。
 
-这些是随包词条数量，不是当前客户端的覆盖率。安装时按目标版本英文词库合并，未覆盖的新键保留英文；在线页面也可能先于桌面客户端新增文案。具体修复和验证范围见 [Windows 官方订阅本地化说明](docs/windows-official-localization.md)。
+Windows 需要系统自带的 `powershell.exe`，并提前安装 Claude Desktop；普通安装无需额外安装 Python、Node.js 或配置 API 密钥。资源已按上述客户端版本核对，其他版本仍需检查实际安装结果。
 
-`Low / Medium / High / Extra / Max` 和 `Effort` 保留英文；模型说明提供中文。代码块、用户消息、输入内容和权限策略的数据值不参与显示层翻译。
+## Windows 菜单说明
 
-## 安装模式
+| 选项 | 用途 |
+| --- | --- |
+| `1` 标准汉化 | 写入语言资源及前端文本补丁，保留 `app.asar` 与 `Claude.exe` 原有签名；不含在线页面和模型选择器补丁。 |
+| **`2` 官方账号登录模式（完整汉化）** | 在标准汉化基础上补充在线账号页面、主进程菜单与模型选择器翻译；官方订阅账号本轮修复使用此项。 |
+| `3` Frida 运行时汉化 | 实验模式，需要额外运行时和注入条件，普通安装无需选择。 |
+| `4` 恢复原样 / 卸载补丁 | 使用备份恢复应用文件、移除补丁语言注册，并将语言设置切回英文。 |
+| `5` 自动更新设置 | `y` 禁止 Claude 自动更新，`n` 允许。 |
+| `6` 同步 CC Switch skills | 可选的本地技能同步，官方账号登录和界面翻译无需启用。 |
 
-只需要做一个选择：
+模式 `2` 会改写 `app.asar` 并同步 `Claude.exe` 内嵌的完整性哈希，使 EXE 的 Authenticode 校验显示 `HashMismatch`。Cowork VM 服务可能因此拒绝连接；需要保留签名时选择模式 `1`，其翻译范围见上表。
 
-### [1] 标准汉化
+## 翻译范围与文件
 
-不修改 `app.asar` 和 `Claude.exe`，保留 Claude 的代码签名。
+| 文件 | 用途 |
+| --- | --- |
+| `install-windows.bat` | Windows 安装入口与管理员启动。 |
+| `scripts/install_windows.ps1` | 查找安装目录、备份、安装、卸载和在线页面补丁。 |
+| `resources/frontend-zh-CN.json` | 应用页面和设置的键值翻译。 |
+| `resources/desktop-zh-CN.json` | 菜单、托盘和系统对话框翻译。 |
+| `resources/dynamic-zh-CN.json` | 模型说明与思考选项动态词库。 |
+| `resources/frontend-hardcoded-zh-CN.json` | 硬编码文本与在线页面翻译映射。 |
+| `resources/statsig-zh-CN.json` | Statsig 文案资源。 |
+| `resources/manifest.json` | 简体中文资源信息与当前词条数量。 |
+| `resources/release.json` | 源码包版本及安装入口的 GitHub Release 更新检查来源。 |
 
-- 菜单栏、托盘、系统对话框、应用内界面：中文
-- 不含：在线页面汉化、模型选择器汉化、第三方模型名校验绕过
-- 用第三方 API 时，需要在网关或 CC Switch 中把模型名映射成 `claude-*` 风格的名称，否则推理配置无法保存
+安装时将中文词库与目标客户端当前的英文词库按键合并：已有译文使用中文，新键回退英文，当前版本不再使用的旧键不写入应用。随包词条数量见 `resources/manifest.json`，不能据此推算所有在线页面的翻译覆盖率。
 
-### [2] 官方账号登录模式（完整汉化）
+在线翻译会跳过用户消息、输入内容和代码区域。翻译网站权限和余额文案不会改变权限策略，也不会开启付费余额、购买额度或重置用量。
 
-改写 `app.asar`，并重算 `Claude.exe` 内嵌的完整性哈希。
+## 卸载与 Claude 更新
 
-- 在 [1] 的基础上，额外汉化在线页面、主进程菜单、模型选择器
-- 适合官方订阅账号登录后的在线界面；第三方模型名能否使用仍取决于客户端和网关的校验规则
-- Windows 上会改变 `Claude.exe` 的签名状态，可能使 Cowork VM 服务拒绝连接
+运行 `install-windows.bat`，选择 **4：恢复原样 / 卸载补丁**，完成后手动启动 Claude。应用文件的备份位于安装目录的 `resources\.zh-cn-backups\`，请保留该目录以便恢复。
 
-官方订阅登录后需要在线页面汉化时，选择 `[2]`。需要保留代码签名或依赖 Cowork 沙箱时，优先选择 `[1]`，该模式不包含在线 DOM 翻译。
-
-## Cowork 沙箱/工作区说明
-
-Cowork 的可用性取决于当前客户端、系统虚拟化条件和服务的签名校验。模式 `[2]` 改写 `app.asar` 并同步 `Claude.exe` 的哈希，会使 Authenticode 校验显示 `HashMismatch`；Cowork 服务可能因此报 `RPC pipe closed`。
-
-模式 `[1]` 不修改这两个文件，但也不会修复系统本身的虚拟化或服务问题。需要 Cowork 时，选择 `[1]` 并分别排查客户端和系统条件。
-
-## 适用环境
-
-- Windows 10/11，或 macOS
-- 已安装 Claude Desktop
-- macOS 需要 Python 3（优先用 `/usr/bin/python3`，没有则从 `PATH` 找 `python3`）
-- Windows 需要系统自带的 Windows PowerShell（`powershell.exe`），批处理入口会自动请求管理员权限
-
-## 使用方式
-
-### Windows
-
-1. 退出 Claude Desktop。
-2. 下载或克隆本项目。
-3. 双击 `install-windows.bat`，按 UAC 提示授权；脚本会先把安装文件复制到临时目录再以管理员身份运行。
-4. 选择安装模式；官方订阅账号的在线界面选择 `2` 官方账号登录模式，详见上文「安装模式」。
-5. 选择语言：`1` 简体中文、`2` 繁体中文（中国台湾）、`3` 繁体中文（中国香港）。
-6. 脚本会先尝试从旧备份恢复以清理上一轮汉化；没有旧备份时跳过并继续。
-7. 脚本会备份被修改的文件、写入中文资源并重启 Claude Desktop。
-8. 如果没有自动切换，打开左下角账号菜单，选择 `Language` → 对应的中文选项。
-
-其他菜单项：
-
-- `3` Frida 运行时汉化（实验）：不修改磁盘上的 `app.asar` / `Claude.exe`，用 Frida 内存补丁加 CDP 注入在线页面 DOM 翻译。若本机缺 Python + frida，会提示下载便携运行时到 `%LOCALAPPDATA%\claude-zh\runtime`。需要本机允许 Frida 注入，**不适合当普通安装方式**。
-- `4` 恢复原样 / 卸载补丁。
-- `5` 自动更新设置：`y` 禁止自动更新，`n` 允许。
-- `6` CC Switch skills 同步：`y` 把 `%USERPROFILE%\.cc-switch\skills` 中缺失的 skill 软链接进 Claude Desktop 的本地 skills 目录；`n` 只删除之前同步产生的软链接和记录，不动 CC Switch 源目录。
-
-### macOS
-
-1. 退出 Claude Desktop。
-2. 下载或克隆本项目。
-3. 双击 `install-mac.command`，选择安装模式（`1` 标准汉化 / `2` 完整汉化）。
-4. 选择语言：`1` 简体中文、`2` 繁体中文（中国台湾）、`3` 繁体中文（中国香港）。
-5. 按提示输入登录密码（选项 `1`/`2`/`4`/`5` 需要）。
-6. 安装完成后 Claude 会自动重新打开。
-7. 如果没有自动切换，打开左下角账号菜单，选择 `Language` → 对应的中文选项。
-
-其他菜单项与 Windows 相同（`3` Frida、`4` 恢复、`5` 自动更新、`6` CC Switch skills）。
-
-**macOS 的自动更新**：补丁会对应用做本机 ad-hoc 重签名。从 2026-08 版本起，重签时显式写入 `identifier` 级别的 designated requirement（替代默认的 cdhash 级别），因此 Claude Desktop 的官方自动更新下载后可以正常安装，不会再卡在「下载完成但版本不变」。
-
-- 更新安装成功后，`/Applications/Claude.app` 会被官方英文版覆盖，重跑本补丁即可恢复中文。
-- 如果之前打过旧版补丁（默认 ad-hoc DR），需要重打一次才能获得新的签名行为。
-
-## 文件说明
-
-- `install-windows.bat` / `install-mac.command`：两个平台的安装入口。
-- `scripts/install_windows.ps1`：Windows 汉化安装和卸载脚本。
-- `scripts/patch_claude_zh_cn.py`：macOS 上真正执行补丁的 Python 脚本。
-- `scripts/translate_missing.py`：词表维护工具，用于补齐 Claude 更新后新增的文案，见「补齐词表」。
-- `scripts/experimental/`：Frida 实验模式相关文件（便携运行时自举、启动器、注入 Agent、常驻计划任务）。
-- `resources/manifest.json` / `manifest-zh-TW.json` / `manifest-zh-HK.json`：语言包信息。
-- `resources/frontend-<语言>.json`：应用内界面翻译。
-- `resources/frontend-hardcoded-<语言>.json`：未走 i18n key 的硬编码文本映射，同时用于在线页面的 DOM 翻译表。
-- `resources/desktop-<语言>.json`：主进程壳层（菜单栏、托盘、对话框）翻译。
-- `resources/statsig-<语言>.json`：statsig i18n 兜底资源。
-- `resources/dynamic-zh-CN.json`：Windows 模型动态词库；按目标版本英文键合并，保留英文思考等级。
-- `resources/Localizable*.strings`：macOS 原生菜单资源。
-- `resources/release.json`：安装入口用来检查 GitHub Releases 是否有新版。
-
-## 脚本会做什么
-
-两个平台的共同流程：
-
-1. 查找 Claude Desktop 安装目录。
-2. 安装前先尝试从旧备份恢复，清理上一轮汉化；没有旧备份时跳过。
-3. 备份本次实际会改动的文件（Windows 存到安装目录下的 `resources\.zh-cn-backups\<时间戳>\`，macOS 把整个 `Claude.app` 备份到同目录）。
-4. 写入中文资源。
-5. 把当前选择的中文变体加入前端语言白名单。
-6. 汉化前端 bundle 中未走 i18n JSON 的硬编码界面文本（侧边栏入口、配置页标签、模型选择项等）。
-7. 写入用户配置，把 `locale` 设为所选语言。
-8. 重启 Claude Desktop。
-
-**语言包合并**：随包中文翻译与目标机器当前的 `en-US.json` 按 key 合并，已有译文用中文，新增但未翻译的 key 保留英文，目标版本没有的旧键不写入应用。Windows 的动态模型词库也采用这个合并方式。
-
-**在线界面**：Windows 词表区分大小写，保留 `Extensions` 和 `EXTENSIONS` 等不同源文；数字、重置时间和到期日由动态规则处理。菜单、模型文案先处理，在线词表最后注入，避免后续替换损坏英文匹配键。
-
-**仅模式 `[2]` 会做的事**：
-
-- 改写 `app.asar`：注入在线账号页面的 DOM 翻译、主进程菜单汉化、模型选择器汉化。
-- macOS 完整模式还包含已有的第三方模型名校验补丁；这轮 Windows 本地化不更改模型路由。
-- Windows 上同步改写 `Claude.exe` 内嵌的完整性哈希。
-
-这些改动会改变被签名覆盖的文件内容。Windows 模式 `[2]` 不再具有原版文件的 Authenticode 签名状态。
-
-## Claude 更新后
-
-Claude Desktop 每次更新都可能改动界面结构，补丁也会被覆盖。推荐流程：
-
-1. 先运行安装入口选 `[4]` 恢复原样。
-2. 再更新 Claude Desktop。
-3. 最后用本项目最新版本重新安装。
-
-如果更新后你发现某些界面出现英文，那是新版本新增了本包还没有的文案。可以提 Issue 说明具体位置（界面路径 + 英文原文 + 截图），帮助补齐词表。
-
-## 补齐词表（维护者向）
-
-Claude 更新后新增的文案可以用仓库自带的脚本批量补齐：
-
-```bash
-python scripts/translate_missing.py --limit 1    # 预览一批，先看质量
-python scripts/translate_missing.py --merge      # 全量翻译并写回词表
-```
-
-脚本的工作流程：
-
-1. 自动探测已安装的 Claude Desktop（Windows 走 `Get-AppxPackage`，macOS 走 `/Applications/Claude.app`），读取它的 `en-US.json`；也可以用 `--app` 手动指定。
-2. 与 `resources/frontend-zh-CN.json` 比对，找出缺失的 key。
-3. 扫描应用的 JS bundle，优先处理被本地代码引用的 key。在线订阅页面可能使用另一套 bundle，未在本地找到引用不能作为「不会显示」的证明，仍应按实际界面核对。
-4. 分批调用 Anthropic 兼容接口翻译，逐条校验 ICU 占位符、花括号结构和单引号。
-5. 校验不通过的自动退回单条重译。
-6. `--merge` 把通过校验的译文写回词表（原件备份为 `.bak`）。
-
-结果会增量写入 `.translate-missing-results.jsonl`，中途中断后重跑会自动跳过已完成的部分。
-
-**凭据**通过环境变量提供：
-
-```bash
-export TRANSLATE_API_BASE=https://api.deepseek.com/anthropic
-export TRANSLATE_API_KEY=sk-...
-```
-
-如果本机已经用 cc-switch 配好了 Claude Desktop profile，脚本会自动复用其中的凭据，不需要额外设置。
-
-只依赖 Python 3 标准库，无需安装第三方包。目前只支持 `zh-CN`；`zh-TW` / `zh-HK` 词表需要人工维护。
-
-## 卸载 / 恢复
-
-运行对应平台的安装入口，选择 `[4]`。
-
-- Windows：恢复备份文件、删除中文资源、把用户语言设置改回 `en-US`。
-- macOS：恢复 `/Applications` 下最早的 `Claude.backup-before-zh-CN-*.app`，并删除其他补丁备份。
+Claude Desktop 更新可能覆盖补丁或新增文案。更新前可先选择 `4` 恢复原样；更新完成后，下载本项目当前源码包，重新选择 **2 → 1** 安装，并核对实际界面。
 
 ## 常见问题
 
-**装完还是英文？**
+**下载新版本后，界面还是旧翻译？**
 
-先确认 Claude Desktop 已经重启。如果只有部分界面是英文，多半是 Claude 更新后新增了文案，见「Claude 更新后」。
+确认运行的是新解压目录中的 `install-windows.bat`，整个 `scripts` 与 `resources` 文件夹均来自同一源码包。旧安装入口会继续使用旁边的旧词库；只替换 README、单个脚本或重启 Claude 都不会更新完整补丁。
 
-**Cowork 用不了？**
+**设置菜单中文了，Chrome 设置和用量正文仍是英文？**
 
-见上文「Cowork 沙箱/工作区说明」。先使用模式 `[1]` 保留签名，再分别检查系统虚拟化条件和服务日志。
+先确认安装时选了第一层菜单的 **2：官方账号登录模式**，再选语言 **1：简体中文**，并检查本次安装是否完成。模式 `1` 不包含在线页面翻译。完成安装后仍有漏翻时，请记录页面路径、英文原文和客户端版本，反馈截图前隐去账号与聊天内容。
 
-**第三方模型配置保存不了？**
+**为什么 `Max` 仍然是英文？**
 
-先检查当前客户端允许的模型 ID 和网关路由。必要时在网关 / CC Switch 中配置别名；Windows 模式 `[2]` 的在线界面汉化不保证绕过模型名校验。
+思考等级沿用原界面的 `Low / Medium / High / Extra / Max`，便于与 Claude Code 和英文文档对照；说明文字使用中文。
 
-**Windows 提示 `RPC pipe closed`？**
+**截图为什么与当前界面不同？**
 
-模式 `[2]` 造成签名失效，Cowork 服务拒绝连接。改用模式 `[1]`。
+`docs/images/` 内现有截图来自旧版客户端，只能参考旧版效果。此次修复核对的客户端版本为 **2.19675.0**，旧截图不作为本轮实际界面的验收证据。
 
-## 致谢
+## 验证与维护范围
 
-本项目基于 [javaht/claude-desktop-zh-cn](https://github.com/javaht/claude-desktop-zh-cn)（MIT）发展而来，感谢原作者搭建的补丁框架与安装流程。
+仓库的 [自动测试](https://github.com/Chrisutina/claude-desktop-zh-cn/actions/workflows/tests.yml) 覆盖 DOM 翻译保护、Windows 语言合并、大小写匹配、动态文案、英文思考等级，以及临时目录中的备份与卸载行为。脚本测试通过后，仍需在安装后的真实界面检查思考选项、右键菜单和设置页；本轮源码验证不能替代这些界面的重装验收。
 
-## 免责声明
+仓库保留原项目的 macOS、其他中文变体及实验工具。本轮修复与验证范围为 Windows 简体中文官方账号模式，其他平台和登录方式沿用已有实现。
 
-本项目为非官方中文补丁，与 Anthropic 无关，仅修改本机 Claude Desktop 的本地资源文件，不修改 Claude 服务端账号数据。Claude Desktop 更新后资源结构可能变化；如果补丁失败，请先恢复原版应用再更新本项目，不要在安装未完成的状态下反复运行脚本。
+## 来源与许可
 
-## 许可
-
-MIT，见 [LICENSE](LICENSE)。
+本项目基于 [javaht/claude-desktop-zh-cn](https://github.com/javaht/claude-desktop-zh-cn) 的补丁框架继续维护，是非官方本地化补丁，与 Anthropic 无关。许可为 MIT，见 [LICENSE](LICENSE)。

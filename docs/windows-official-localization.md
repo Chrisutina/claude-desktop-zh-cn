@@ -1,5 +1,7 @@
 # Windows 官方订阅账号本地化
 
+源码修复版 **1.4.11**（2026-10-03），资源核对客户端为 **Claude Desktop 2.19675.0**。下载 [main 分支源码 ZIP](https://github.com/Chrisutina/claude-desktop-zh-cn/archive/refs/heads/main.zip)；源码版本与客户端版本分别记录。
+
 运行 `install-windows.bat`，选择 **2：官方账号登录模式（完整汉化）→ 1：简体中文**。不需要第三方 API 配置。重新安装会关闭并重启 Claude，先结束正在运行的任务。
 
 ## 本轮修复
