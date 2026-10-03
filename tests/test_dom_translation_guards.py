@@ -71,6 +71,15 @@ def _windows_added_month_rules(added_on_suffix: str) -> str:
             '[/^added %s (\\d\\d?)(?:, \\d\\d\\d\\d)?$/,%s]'
             % (month, json.dumps(label, ensure_ascii=False, separators=(",", ":")))
         )
+    for index, month in enumerate(_WINDOWS_MONTH_NAMES):
+        for pattern, label in (
+            (r"(\d\d?), (\d{4})", f"$2年{index + 1}月$1日"),
+            (r"(\d\d?)", f"{index + 1}月$1日"),
+        ):
+            parts.append(
+                f"[/^{month} {pattern}$/," +
+                json.dumps(label, ensure_ascii=False, separators=(",", ":")) + "]"
+            )
     return ",".join(parts)
 
 
@@ -79,7 +88,7 @@ def materialize_windows_dom_script(template: str) -> str:
         "__LANGUAGE__": "zh-CN",
         "__MAPPING__": {"Settings": "设置", "deploy-command": "部署命令"},
         "__SELECTED_TEXT__": "已选择 $1 项",
-        "__DELETE_SELECTED_TEXT__": "删除 $1 个所选项目",
+        "__DELETE_SELECTED_TEXT__": "删除 $1 个所选项",
         "__UPDATED_MINUTE_TEXT__": "$1 分钟前更新",
         "__UPDATED_HOUR_TEXT__": "$1 小时前更新",
         "__UPDATED_DAY_TEXT__": "$1 天前更新",
@@ -97,6 +106,19 @@ def materialize_windows_dom_script(template: str) -> str:
         "__ADDED_WEEK__": "$1 周前添加",
         "__ADDED_MONTH__": "$1 个月前添加",
         "__ADDED_YEAR__": "$1 年前添加",
+        "__LEGACY_MEMORY_MIGRATION_TEXT__": "我们已迁移至新的记忆系统。如果你想导出旧版记忆，还剩 $1 天时间。",
+        "__LEGACY_MEMORY_PREFIX_TEXT__": "我们已迁移至新的记忆系统。剩余 $1 天可",
+        "__PAST_HOUR__": "过去 $1 小时",
+        "__PAST_DAY__": "过去 $1 天",
+        "__PAST_WEEK__": "过去 $1 周",
+        "__PAST_MONTH__": "过去 $1 个月",
+        "__PAST_YEAR__": "过去 $1 年",
+        "__HIDE_SIDEBAR__": "隐藏侧边栏 ⌘ B",
+        "__SHOW_SIDEBAR__": "显示侧边栏 ⌘ B",
+        "__DELETE_ITEMS_PERMANENTLY__": "$1 项内容将被永久删除。此操作无法撤销。",
+        "__DELETE_SELECTED_TITLE__": "删除所选项？",
+        "__DELETE_CHAT_TITLE__": "删除聊天？",
+        "__ORG_INFERENCE_TEXT__": "你正在通过组织的推理服务商（$1）使用 Claude。对话会发送到该服务商，而非 Anthropic，并受组织与该服务商签订的协议约束。",
     }
     script = template.replace(
         "__ADDED_MONTH_RULES__", _windows_added_month_rules("添加")
@@ -265,7 +287,12 @@ const protectedAnchor = new Element('A');
 protectedAnchor.append(textElement('Claude', ['.standard-markdown'], 'SPAN'));
 body.append(protectedAnchor);
 
-const dialogCandidates = [ordinaryDialog, protectedDialog];
+const interactiveDialog = new Element('DIV');
+interactiveDialog.append(textElement('Set', [], 'SPAN'));
+const interactiveLink = interactiveDialog.append(textElement('tings', [], 'A'));
+body.append(interactiveDialog);
+
+const dialogCandidates = [ordinaryDialog, protectedDialog, interactiveDialog];
 const attributeCandidates = [ordinaryAttribute, protectedAttribute];
 const anchorCandidates = [ordinaryAnchor, protectedAnchor];
 
@@ -326,6 +353,10 @@ const result = {
   protectedDialogOverwritten: protectedDialog.overwritten,
   protectedDialogChildren: protectedDialog.children.length,
   protectedDialogChildPreserved: protectedDialogChild.parentElement === protectedDialog,
+  interactiveDialog: interactiveDialog.textContent,
+  interactiveDialogOverwritten: interactiveDialog.overwritten,
+  interactiveDialogChildren: interactiveDialog.children.length,
+  interactiveLinkPreserved: interactiveDialog.children.includes(interactiveLink),
   ordinaryAttribute: ordinaryAttribute.getAttribute('aria-label'),
   protectedAttribute: protectedAttribute.getAttribute('aria-label'),
   ordinaryAnchorHidden: ordinaryAnchor.style.visibility,
@@ -335,10 +366,10 @@ process.stdout.write(JSON.stringify(result));
 '''
 
 
-def run_dom_fixture(script: str) -> dict:
+def run_dom_fixture(script: str, suffix: str = DOM_FIXTURE_SUFFIX) -> dict:
     completed = subprocess.run(
         ["node"],
-        input=DOM_FIXTURE_PREFIX + "\n" + script + "\n" + DOM_FIXTURE_SUFFIX,
+        input=DOM_FIXTURE_PREFIX + "\n" + script + "\n" + suffix,
         text=True,
         # Node always emits UTF-8. Without an explicit encoding, text=True decodes
         # with the host locale codec (cp936 on Chinese Windows), which mangles any
@@ -450,6 +481,65 @@ class DomTranslationGuardTests(unittest.TestCase):
 
     def test_windows_generated_script_preserves_protected_dom_content(self):
         self.assert_behavior_fixture(self.materialized_windows_script)
+
+
+    def test_windows_dialog_translation_preserves_interactive_children(self):
+        result = run_dom_fixture(self.materialized_windows_script)
+        self.assertEqual(result["interactiveDialog"], "Settings")
+        self.assertFalse(result["interactiveDialogOverwritten"])
+        self.assertEqual(result["interactiveDialogChildren"], 2)
+        self.assertTrue(result["interactiveLinkPreserved"])
+
+    def test_windows_usage_and_site_permission_dynamic_values(self):
+        expected = {
+            "Hide sidebar Ctrl+B": "隐藏侧边栏 Ctrl+B",
+            "Show sidebar Ctrl B": "显示侧边栏 Ctrl+B",
+            "Hide sidebar ⌘B": "隐藏侧边栏 ⌘ B",
+            "Show sidebar ⌘ B": "显示侧边栏 ⌘ B",
+            "0% used": "已使用 0%",
+            "55% used": "已使用 55%",
+            "12.5% used": "已使用 12.5%",
+            "Up to 30% off": "最高优惠 30%",
+            "Up to 12.5% off": "最高优惠 12.5%",
+            "Resets Sunday 1:00 PM": "周日 13:00 重置",
+            "Resets Monday 9:30 AM": "周一 09:30 重置",
+            "Resets Sunday 12:00 AM": "周日 00:00 重置",
+            "Resets Sunday 12:00 PM": "周日 12:00 重置",
+            "RESETS SUNDAY 1:00 PM": "周日 13:00 重置",
+            "Resets Sunday 13:00": "周日 13:00 重置",
+            "Resets Tue at 18:45": "周二 18:45 重置",
+            "Resets tomorrow at 1:00 PM": "明天 13:00 重置",
+            "Resets today 9:30 AM": "今天 09:30 重置",
+            "Expires Oct 23": "10月23日到期",
+            "Expires Oct 23, 2026": "2026年10月23日到期",
+            "EXPIRES OCT 23": "10月23日到期",
+            "Expires February 9": "2月9日到期",
+            "Resets in 2h 15m": "2 小时 15 分钟后重置",
+            "Resets in 2 hr 15 min": "2 小时 15 分钟后重置",
+            "Resets in 3 hours": "3 小时后重置",
+            "Resets in 30 min": "30 分钟后重置",
+            "5-hour reset": "5 小时额度重置",
+            "Domain 3": "域名 3",
+            "Remove domain 3": "移除域名 3",
+            "Choose whether Another product works on all sites by default":
+                "选择是否默认允许 Another product 在所有网站上操作",
+            "added Jan 9": "1月9日添加",
+            "Oct 3, 2026": "2026年10月3日",
+            "Delete selected?": "删除所选项？",
+            "Past 24 hours": "过去 24 小时",
+            "Low": None, "Medium": None, "High": None,
+            "Extra": None, "Max": None, "Effort": None,
+        }
+        # Expose only the generated translator to the fixture; product code is unchanged.
+        script = self.materialized_windows_script.replace(
+            "const X=", "globalThis.translateForTest=R;const X=", 1
+        )
+        suffix = (
+            "const samples=" + json.dumps(list(expected), ensure_ascii=False) + ";"
+            "process.stdout.write(JSON.stringify(Object.fromEntries("
+            "samples.map(s=>[s,translateForTest(s)??null]))));"
+        )
+        self.assertEqual(run_dom_fixture(script, suffix), expected)
 
 
 if __name__ == "__main__":

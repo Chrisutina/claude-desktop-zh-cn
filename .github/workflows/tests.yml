@@ -44,3 +44,18 @@ jobs:
               json.loads(raw)
           print("All resource JSON files are valid with no duplicate keys.")
           PY
+
+  windows-localization:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify Windows language merge and translation behavior
+        shell: powershell
+        run: ./tests/test_windows.ps1

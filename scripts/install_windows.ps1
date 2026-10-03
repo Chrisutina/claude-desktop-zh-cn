@@ -134,7 +134,7 @@ function Read-InteractiveSelection {
     Write-Host "    · 用第三方 API 时需在网关或 CC Switch 中把模型名映射为"
     Write-Host "      Claude / Anthropic 风格名称，否则推理配置无法保存"
     Write-Host ""
-    Write-Host "[2] 完整汉化    改写 app.asar 并重算 Claude.exe 内嵌完整性哈希"
+    Write-Host "[2] 官方账号登录模式（完整汉化）    改写 app.asar 并重算 Claude.exe 内嵌完整性哈希"
     Write-Host "    · 在 [1] 基础上额外汉化在线页面、主进程菜单、模型选择器，"
     Write-Host "      并绕过第三方模型名校验"
     Write-Host "    · Cowork 沙箱/工作区：必不可用（签名失效）"
@@ -541,6 +541,7 @@ function New-BackupSet {
     }
 
     New-Item -ItemType Directory -Path $path -Force | Out-Null
+    Save-JsonNoBom (Join-Path $path '.backup-metadata.json') ([pscustomobject]@{ createdFiles = @() })
     $script:CurrentBackupSetPath = $path
     Write-Host "  backup set: $path" -ForegroundColor DarkGray
     return $path
@@ -635,6 +636,7 @@ function Restore-LatestBackup {
     $backupRoot = $backup.FullName.TrimEnd('\', '/')
     $files = @(Get-ChildItem $backup.FullName -File -Recurse -ErrorAction SilentlyContinue)
     foreach ($file in $files) {
+        if ($file.Name -eq '.backup-metadata.json') { continue }
         $relative = $file.FullName.Substring($backupRoot.Length).TrimStart('\', '/')
         if ($relative.StartsWith("_app\", [System.StringComparison]::OrdinalIgnoreCase)) {
             $appPath = Get-ClaudeAppPathFromResources $ResourcesPath
@@ -663,6 +665,11 @@ function Get-LanguageResources {
         Statsig = Join-Path $resourcesDir "statsig-$Lang.json"
     }
 
+    $dynamicTranslation = Join-Path $resourcesDir "dynamic-$Lang.json"
+    if (Test-Path -LiteralPath $dynamicTranslation) {
+        $resources["Dynamic"] = $dynamicTranslation
+    }
+
     foreach ($path in $resources.Values) {
         Require-File $path
     }
@@ -679,6 +686,7 @@ function Enable-WriteAccess {
         (Join-Path $ResourcesPath "ion-dist"),
         (Join-Path $ResourcesPath "ion-dist\i18n"),
         (Join-Path $ResourcesPath "ion-dist\i18n\statsig"),
+        (Join-Path $ResourcesPath "ion-dist\i18n\dynamic"),
         (Join-Path $ResourcesPath "ion-dist\assets"),
         (Join-Path $ResourcesPath "ion-dist\assets\v1")
     )
@@ -755,19 +763,64 @@ function Install-LanguageFiles {
     New-Item -ItemType Directory -Path $i18nDir -Force | Out-Null
     New-Item -ItemType Directory -Path $statsigDir -Force | Out-Null
 
+    Backup-LanguageFile $ResourcesPath (Join-Path $i18nDir "$Lang.json")
     Merge-LocaleWithBaseline -Source $Pack["Frontend"] `
         -Baseline (Join-Path $i18nDir "en-US.json") `
         -Target (Join-Path $i18nDir "$Lang.json") `
         -Label "ion-dist/i18n/$Lang.json"
 
+    Backup-LanguageFile $ResourcesPath (Join-Path $ResourcesPath "$Lang.json")
     Merge-LocaleWithBaseline -Source $Pack["Desktop"] `
         -Baseline (Join-Path $ResourcesPath "en-US.json") `
         -Target (Join-Path $ResourcesPath "$Lang.json") `
         -Label "resources/$Lang.json"
 
     # No en-US baseline ships in the statsig directory, so this stays a plain copy.
+    Backup-LanguageFile $ResourcesPath (Join-Path $statsigDir "$Lang.json")
     Copy-Item $Pack["Statsig"] (Join-Path $statsigDir "$Lang.json") -Force
     Write-Host "  installed ion-dist/i18n/statsig/$Lang.json" -ForegroundColor Green
+
+    # New builds require the dynamic catalog even when it has no bundled translation.
+    # Merge by the installed English keys to preserve fallback and discard stale keys.
+    $dynamicDir = Join-Path $i18nDir "dynamic"
+    $dynamicEn = Join-Path $dynamicDir "en-US.json"
+    if (Test-Path -LiteralPath $dynamicEn) {
+        $dynamicTarget = Join-Path $dynamicDir "$Lang.json"
+        Backup-LanguageFile $ResourcesPath $dynamicTarget
+        if ($Pack["Dynamic"] -and (Test-Path -LiteralPath $Pack["Dynamic"])) {
+            Merge-LocaleWithBaseline -Source $Pack["Dynamic"] -Baseline $dynamicEn `
+                -Target $dynamicTarget -Label "ion-dist/i18n/dynamic/$Lang.json"
+        } else {
+            Copy-Item -LiteralPath $dynamicEn -Destination $dynamicTarget -Force
+            Write-Host "  installed ion-dist/i18n/dynamic/$Lang.json (English fallback)" -ForegroundColor Green
+        }
+    }
+}
+
+function Backup-LanguageFile {
+    param([string]$ResourcesPath, [string]$Target)
+
+    $backup = New-BackupSet $ResourcesPath
+    $relative = Get-RelativeResourcePath $ResourcesPath $Target
+    $metadataPath = Join-Path $backup '.backup-metadata.json'
+    if (-not (Test-Path -LiteralPath $metadataPath)) {
+        # Old installers never backed up locale files; keep their uninstall behavior.
+        $created = @(Get-LanguageFileTargets $ResourcesPath | ForEach-Object {
+            Get-RelativeResourcePath $ResourcesPath $_
+        } | Where-Object {
+            (Test-Path -LiteralPath (Join-Path $ResourcesPath $_)) -and
+            -not (Test-Path -LiteralPath (Join-Path $backup $_))
+        })
+        Save-JsonNoBom $metadataPath ([pscustomobject]@{ createdFiles = $created })
+    }
+    $metadata = Get-JsonObjectOrBackup $metadataPath
+    $created = @($metadata.createdFiles | Where-Object { $_ })
+    if (Test-Path -LiteralPath $Target) {
+        if ($created -notcontains $relative) { Backup-ModifiedFile $ResourcesPath $Target }
+    } elseif ($created -notcontains $relative) {
+        Add-OrSetJsonProperty $metadata 'createdFiles' @($created + $relative)
+        Save-JsonNoBom $metadataPath $metadata
+    }
 }
 
 function Align-4 {
@@ -1501,7 +1554,7 @@ function Get-OnlineTranslationMap {
     Write-Host "  loading online DOM translation sources" -ForegroundColor DarkGray
     $en = Get-Content $enPath -Raw -Encoding UTF8 | ConvertFrom-Json
     $zh = Get-Content $Pack["Frontend"] -Raw -Encoding UTF8 | ConvertFrom-Json
-    $mapping = [ordered]@{}
+    $mapping = [System.Collections.Specialized.OrderedDictionary]::new([System.StringComparer]::Ordinal)
 
     Write-Host "  collecting frontend i18n DOM strings" -ForegroundColor DarkGray
     foreach ($property in $en.PSObject.Properties) {
@@ -1515,6 +1568,18 @@ function Get-OnlineTranslationMap {
         }
     }
 
+    $dynamicEnPath = Join-Path $ResourcesPath "ion-dist\i18n\dynamic\en-US.json"
+    if ($Pack["Dynamic"] -and (Test-Path -LiteralPath $dynamicEnPath)) {
+        $dynamicEnglish = Get-Content -LiteralPath $dynamicEnPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $dynamicChinese = Get-Content -LiteralPath $Pack["Dynamic"] -Raw -Encoding UTF8 | ConvertFrom-Json
+        foreach ($property in $dynamicEnglish.PSObject.Properties) {
+            $translation = $dynamicChinese.PSObject.Properties[$property.Name]
+            if ($translation -and (Test-OnlineDomTranslationEntry ([string]$property.Value) ([string]$translation.Value))) {
+                $mapping[[string]$property.Value] = [string]$translation.Value
+            }
+        }
+    }
+
     Write-Host "  merging hardcoded DOM strings" -ForegroundColor DarkGray
     foreach ($pair in @(Get-FrontendHardcodedReplacements $Language)) {
         $source = $pair[0]
@@ -1524,6 +1589,13 @@ function Get-OnlineTranslationMap {
         }
     }
 
+    if ($Language -eq "zh-CN") {
+        # Keep the original labels for effort; shared Low/Medium/High catalogs
+        # still localize other contexts through their native i18n keys.
+        foreach ($label in @("Low", "Medium", "High", "Extra", "Max", "Effort")) {
+            $mapping.Remove($label)
+        }
+    }
     Write-Host "  prepared online DOM translation map: $($mapping.Count) strings" -ForegroundColor DarkGray
     return $mapping
 }
@@ -1539,7 +1611,7 @@ function Get-OnlineDomTranslationScript {
     $languageJson = $Language | ConvertTo-Json -Compress
     if ($Language -eq "zh-CN") {
         $selectedText = "已选择 `$1 项"
-        $deleteSelectedText = "删除 `$1 个所选项目"
+        $deleteSelectedText = "删除 `$1 个所选项"
         $updatedMinuteText = "`$1 分钟前更新"
         $updatedHourText = "`$1 小时前更新"
         $updatedDayText = "`$1 天前更新"
@@ -1604,17 +1676,62 @@ function Get-OnlineDomTranslationScript {
         $addedOnLabel = ('' + ($i + 1) + '月$1日') + $addedOnSuffix
         '[/^added ' + $addedMonthNames[$i] + ' (\d\d?)(?:, \d\d\d\d)?$/,' + ($addedOnLabel | ConvertTo-Json -Compress) + ']'
     }
+    $monthDayRuleParts = for ($i = 0; $i -lt 12; $i++) {
+        $mNum = $i + 1
+        '[/^' + $addedMonthNames[$i] + ' (\d\d?), (\d{4})$/,"$2年' + $mNum + '月$1日"],[/^' + $addedMonthNames[$i] + ' (\d\d?)$/,"' + $mNum + '月$1日"]'
+    }
+    $legacyMemoryMigrationText = if ($Language -eq "zh-CN") {
+        "我们已迁移至新的记忆系统。如果你想导出旧版记忆，还剩 `$1 天时间。"
+    } else {
+        "我們已遷移至新的記憶系統。如果您想匯出舊版記憶，還剩 `$1 天時間。"
+    }
+    $legacyMemoryMigrationTextJson = $legacyMemoryMigrationText | ConvertTo-Json -Compress
+    $legacyMemoryPrefixText = if ($Language -eq "zh-CN") {
+        "我们已迁移至新的记忆系统。剩余 `$1 天可"
+    } else {
+        "我們已遷移至新的記憶系統。剩餘 `$1 天可"
+    }
+    $legacyMemoryPrefixTextJson = $legacyMemoryPrefixText | ConvertTo-Json -Compress
+    $pastHourText = if ($Language -eq "zh-CN") { "过去 `$1 小时" } else { "過去 `$1 小時" }
+    $pastDayText = if ($Language -eq "zh-CN") { "过去 `$1 天" } else { "過去 `$1 天" }
+    $pastWeekText = if ($Language -eq "zh-CN") { "过去 `$1 周" } else { "過去 `$1 週" }
+    $pastMonthText = if ($Language -eq "zh-CN") { "过去 `$1 个月" } else { "過去 `$1 個月" }
+    $pastYearText = if ($Language -eq "zh-CN") { "过去 `$1 年" } else { "過去 `$1 年" }
+    $pastHourTextJson = $pastHourText | ConvertTo-Json -Compress
+    $pastDayTextJson = $pastDayText | ConvertTo-Json -Compress
+    $pastWeekTextJson = $pastWeekText | ConvertTo-Json -Compress
+    $pastMonthTextJson = $pastMonthText | ConvertTo-Json -Compress
+    $pastYearTextJson = $pastYearText | ConvertTo-Json -Compress
+    $hideSidebarShortcutText = if ($Language -eq "zh-CN") { "隐藏侧边栏 ⌘ B" } else { "隱藏側邊欄 ⌘ B" }
+    $showSidebarShortcutText = if ($Language -eq "zh-CN") { "显示侧边栏 ⌘ B" } else { "顯示側邊欄 ⌘ B" }
+    $deleteItemsPermanentlyText = if ($Language -eq "zh-CN") { "`$1 项内容将被永久删除。此操作无法撤销。" } else { "`$1 項內容將被永久刪除。此操作無法復原。" }
+    $deleteSelectedTitle = if ($Language -eq "zh-CN") { "删除所选项？" } else { "刪除所選項？" }
+    $deleteChatTitle = if ($Language -eq "zh-CN") { "删除聊天？" } else { "刪除聊天？" }
+    $orgInferenceText = if ($Language -eq "zh-CN") {
+        "你正在通过组织的推理服务商（`$1）使用 Claude。对话会发送到该服务商，而非 Anthropic，并受组织与该服务商签订的协议约束。"
+    } else {
+        "您正在透過您組織自己的推理提供商（`$1）執行 Claude。您的對話會傳送到該提供商而非 Anthropic，並受您的組織與該提供商的協議約束。"
+    }
+    $hideSidebarShortcutTextJson = $hideSidebarShortcutText | ConvertTo-Json -Compress
+    $showSidebarShortcutTextJson = $showSidebarShortcutText | ConvertTo-Json -Compress
+    $deleteItemsPermanentlyTextJson = $deleteItemsPermanentlyText | ConvertTo-Json -Compress
+    $deleteSelectedTitleJson = $deleteSelectedTitle | ConvertTo-Json -Compress
+    $deleteChatTitleJson = $deleteChatTitle | ConvertTo-Json -Compress
+    $orgInferenceTextJson = $orgInferenceText | ConvertTo-Json -Compress
     # __ADDED_MONTH_RULES__ sits inside the G=[...] array literal, so inject the
     # flat comma-joined rule elements -- wrapping them in [ ] would nest them as
     # a single G entry and never match.
-    $addedMonthRulesJson = $addedMonthRuleParts -join ','
+    $addedMonthRulesJson = ($addedMonthRuleParts + $monthDayRuleParts) -join ','
     $template = @'
 (()=>{try{
-const L=__LANGUAGE__,M=__MAPPING__,ST=__SELECTED_TEXT__,DST=__DELETE_SELECTED_TEXT__,UMI=__UPDATED_MINUTE_TEXT__,UH=__UPDATED_HOUR_TEXT__,UD=__UPDATED_DAY_TEXT__,UW=__UPDATED_WEEK_TEXT__,UMO=__UPDATED_MONTH_TEXT__,UY=__UPDATED_YEAR_TEXT__,AS=__AGO_SECOND__,AMN=__AGO_MINUTE__,AH=__AGO_HOUR__,ADY=__AGO_DAY__,AWK=__AGO_WEEK__,ADDMI=__ADDED_MINUTE__,ADDH=__ADDED_HOUR__,ADDD=__ADDED_DAY__,ADDW=__ADDED_WEEK__,ADDMO=__ADDED_MONTH__,ADDY=__ADDED_YEAR__;
+const L=__LANGUAGE__,M=__MAPPING__,ST=__SELECTED_TEXT__,DST=__DELETE_SELECTED_TEXT__,UMI=__UPDATED_MINUTE_TEXT__,UH=__UPDATED_HOUR_TEXT__,UD=__UPDATED_DAY_TEXT__,UW=__UPDATED_WEEK_TEXT__,UMO=__UPDATED_MONTH_TEXT__,UY=__UPDATED_YEAR_TEXT__,AS=__AGO_SECOND__,AMN=__AGO_MINUTE__,AH=__AGO_HOUR__,ADY=__AGO_DAY__,AWK=__AGO_WEEK__,ADDMI=__ADDED_MINUTE__,ADDH=__ADDED_HOUR__,ADDD=__ADDED_DAY__,ADDW=__ADDED_WEEK__,ADDMO=__ADDED_MONTH__,ADDY=__ADDED_YEAR__,LMM=__LEGACY_MEMORY_MIGRATION_TEXT__,LMMP=__LEGACY_MEMORY_PREFIX_TEXT__,PH=__PAST_HOUR__,PD=__PAST_DAY__,PW=__PAST_WEEK__,PMO=__PAST_MONTH__,PY=__PAST_YEAR__,HSB=__HIDE_SIDEBAR__,SSB=__SHOW_SIDEBAR__,DIPT=__DELETE_ITEMS_PERMANENTLY__,DSTT=__DELETE_SELECTED_TITLE__,DCT=__DELETE_CHAT_TITLE__,OIT=__ORG_INFERENCE_TEXT__;
 localStorage.setItem("spa:locale",L);
 document.documentElement&&document.documentElement.setAttribute("lang",L);
 const N=s=>(s||"").replace(/\s+/g," ").trim();
 const G=[
+[/^Delete selected\?$/,DSTT],
+[/^Delete chat\?$/,DCT],
+[/^You[’']re running Claude through your organization[’']s own inference provider \((.+?)\)\. Your conversations are sent there, not to Anthropic, and are governed by your organization[’']s agreement with that provider\.$/,OIT],
 [/^Morning, (.+)$/,"早上好，$1"],[/^Good morning, (.+)$/,"早上好，$1"],
 [/^Afternoon, (.+)$/,"下午好，$1"],[/^Good afternoon, (.+)$/,"下午好，$1"],
 [/^Evening, (.+)$/,"晚上好，$1"],[/^Good evening, (.+)$/,"晚上好，$1"],
@@ -1623,15 +1740,21 @@ const G=[
 [/^Move (\d+) chat to a project$/,"将 $1 个聊天移至项目"],[/^Move (\d+) chats to a project$/,"将 $1 个聊天移至项目"],
 [/^Connection needs (\d+) field$/,"连接还需要填写 $1 个字段"],[/^Connection needs (\d+) fields$/,"连接还需要填写 $1 个字段"],
 [/^needs (\d+) field$/,"还需要填写 $1 个字段"],[/^needs (\d+) fields$/,"还需要填写 $1 个字段"],
-[/^Are you sure you want to delete (\d+) chat\? This cannot be undone\.$/,"你确定要删除 $1 个聊天吗？此操作无法撤消。"],
-[/^Are you sure you want to delete (\d+) chats\? This cannot be undone\.$/,"你确定要删除 $1 个聊天吗？此操作无法撤消。"],
-[/^Are you sure you want to permanently delete this chat\? This cannot be undone\.$/,"你确定要永久删除此聊天吗？此操作无法撤消。"],
-[/^Are you sure you want to permanently delete these chats\? This cannot be undone\.$/,"你确定要永久删除这些聊天吗？此操作无法撤消。"],
+[/^Are you sure you want to delete (\d+) chat\? This cannot be undone\.$/,"确定删除 $1 个聊天吗？此操作无法撤销。"],
+[/^Are you sure you want to delete (\d+) chats\? This cannot be undone\.$/,"确定删除 $1 个聊天吗？此操作无法撤销。"],
+[/^Are you sure you want to permanently delete this chat\? This cannot be undone\.$/,"确定永久删除此聊天吗？此操作无法撤销。"],
+[/^Are you sure you want to permanently delete these chats\? This cannot be undone\.$/,"确定永久删除这些聊天吗？此操作无法撤销。"],
 [/^Archive (\d+) task\? You can find it in the Archived tab\.$/,"要归档 $1 个任务吗？你可以在“已归档”标签页中找到它。"],
 [/^Archive (\d+) tasks\? You can find them in the Archived tab\.$/,"要归档 $1 个任务吗？你可以在“已归档”标签页中找到它们。"],
+[/^We[’']ve migrated to a new memory system\. You have (\d+) days? left if you[’']d like to\s*$/,LMMP],
+[/^We[’']ve migrated to a new memory system\. You have (\d+) days? left if you[’']d like to export legacy memory\.?$/,LMM],
+[/^Hide sidebar\s*(⌘|Ctrl)\s*\+?\s*B$/i,(_,m)=>HSB.replace("⌘ B",m.toLowerCase()==="ctrl"?"Ctrl+B":"⌘ B")],
+[/^Show sidebar\s*(⌘|Ctrl)\s*\+?\s*B$/i,(_,m)=>SSB.replace("⌘ B",m.toLowerCase()==="ctrl"?"Ctrl+B":"⌘ B")],
 [/^(\d+) selected$/,ST],
 [/^Delete (\d+) selected item$/,DST],
 [/^Delete (\d+) selected items$/,DST],
+[/^Delete (\d+) sessions?\?$/,"删除 $1 个会话？"],
+[/^(\d+) items? will be permanently deleted\.\s*This can(?:not|[’']t) be undone\.$/,DIPT],
 [/^Updated (\d+) minutes? ago$/,UMI],
 [/^Updated (\d+) hours? ago$/,UH],
 [/^Updated (\d+) days? ago$/,UD],
@@ -1650,20 +1773,43 @@ const G=[
 [/^added (\d+) months? ago$/,ADDMO],
 [/^added (\d+) years? ago$/,ADDY],
 __ADDED_MONTH_RULES__,
-[/^Mon$/,"周一"],[/^Tue$/,"周二"],[/^Wed$/,"周三"],[/^Thu$/,"周四"],[/^Fri$/,"周五"],[/^Sat$/,"周六"],[/^Sun$/,"周日"]
+[/^Mon$/,"周一"],[/^Tue$/,"周二"],[/^Wed$/,"周三"],[/^Thu$/,"周四"],[/^Fri$/,"周五"],[/^Sat$/,"周六"],[/^Sun$/,"周日"],
+[/^Past (\d+) hours?$/,PH],
+[/^Past (\d+) days?$/,PD],
+[/^Past (\d+) weeks?$/,PW],
+[/^Past (\d+) months?$/,PMO],
+[/^Past (\d+) years?$/,PY]
 ];
-const R=s=>{const n=N(s);if(M[n])return M[n];for(const [r,t] of G){const m=n.match(r);if(m)return t.replace("$1",m[1])}};
+// Resolved subscription/account values do not match ICU catalog templates.
+const UM={Jan:1,Feb:2,Mar:3,Apr:4,May:5,Jun:6,Jul:7,Aug:8,Sep:9,Oct:10,Nov:11,Dec:12};
+const UWEEK={Sun:"周日",Mon:"周一",Tue:"周二",Wed:"周三",Thu:"周四",Fri:"周五",Sat:"周六"};
+const UCLOCK=(h,m,p)=>String(p?Number(h)%12+(p.toUpperCase()==="PM"?12:0):Number(h)).padStart(2,"0")+":"+m;
+if(L==="zh-CN")G.unshift(
+[/^(\d+(?:\.\d+)?)% used$/i,"已使用 $1%"],
+[/^Up to (\d+(?:\.\d+)?)% off$/i,"最高优惠 $1%"],
+[/^Resets (Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sun|Mon|Tue|Wed|Thu|Fri|Sat)(?: at)? (\d{1,2}):(\d{2})(?:\s*(AM|PM))?$/i,(_,d,h,m,p)=>UWEEK[d.slice(0,3).toLowerCase().replace(/^./,c=>c.toUpperCase())]+" "+UCLOCK(h,m,p)+" 重置"],
+[/^Resets (today|tomorrow)(?: at)? (\d{1,2}):(\d{2})(?:\s*(AM|PM))?$/i,(_,d,h,m,p)=>(d.toLowerCase()==="today"?"今天":"明天")+" "+UCLOCK(h,m,p)+" 重置"],
+[/^Expires (Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?) (\d{1,2})(?:, (\d{4}))?$/i,(_,m,d,y)=>(y?y+"年":"")+UM[m.slice(0,3).toLowerCase().replace(/^./,c=>c.toUpperCase())]+"月"+Number(d)+"日到期"],
+[/^Resets in (\d+)\s*(?:h|hr|hrs|hour|hours)\s+(\d+)\s*(?:m|min|mins|minute|minutes)$/i,"$1 小时 $2 分钟后重置"],
+[/^Resets in (\d+)\s*(?:h|hr|hrs|hour|hours)$/i,"$1 小时后重置"],
+[/^Resets in (\d+)\s*(?:m|min|mins|minute|minutes)$/i,"$1 分钟后重置"],
+[/^(\d+)-hour reset$/i,"$1 小时额度重置"],
+[/^Domain (\d+)$/,"域名 $1"],
+[/^Remove domain (\d+)$/,"移除域名 $1"],
+[/^Choose whether (.+?) works on all sites by default$/,"选择是否默认允许 $1 在所有网站上操作"]
+);
+const R=s=>{const n=N(s);if(M[n])return M[n];for(const [r,t] of G){if(r.test(n))return n.replace(r,t)}};
 const X=new Set(["SCRIPT","STYLE","NOSCRIPT"]),C="pre,code,kbd,samp,var,[data-language],[data-testid*=code],.cm-editor,.monaco-editor,.hljs",P='[data-testid="user-message"],.standard-markdown,.progressive-markdown,[data-testid="chat-input"],[data-testid="conway-composer-input"],[data-testid="conway-user-message"] .user-bubble,[data-testid="conway-output-cell"]';
 const SL=/^\/?[a-z][a-z0-9_]*(?:-[a-z0-9_]+)+(?:\s*(?:Custom command|Slash command))?$/i;
 function K(n){let e=n.nodeType===1?n:n.parentElement;for(let i=0;e&&i<5;e=e.parentElement,i++){const t=N(e.textContent);if(SL.test(t))return true;if(/\s/.test(t))break}return false}
 function Q(n){const e=n.nodeType===1?n:n.parentElement;return !!(e&&e.closest(P))}
 function H(n){return Q(n)||!!(n&&n.nodeType===1&&n.querySelector(P))}
-function T(){try{const b=document.body||document.documentElement;if(!b)return;const w=document.createTreeWalker(b,NodeFilter.SHOW_TEXT,{acceptNode(n){const p=n.parentElement;if(!p||X.has(p.tagName)||p.closest('[contenteditable],'+C)||Q(n)||K(n)||!R(n.nodeValue))return NodeFilter.FILTER_REJECT;return NodeFilter.FILTER_ACCEPT}});let n;while(n=w.nextNode()){const v=R(n.nodeValue);if(v)n.nodeValue=v}document.querySelectorAll("[role=dialog] p,[role=dialog] div,[role=dialog] span").forEach(e=>{try{if(e.closest("button,[contenteditable],"+C)||H(e)||K(e))return;const t=R(e.textContent);if(t&&N(e.textContent)!==N(t))e.textContent=t}catch{}});document.querySelectorAll("[aria-label],[title],[placeholder],input,textarea").forEach(e=>{["aria-label","title","placeholder","value"].forEach(a=>{try{if(e.closest(C)||Q(e)||K(e))return;if(a==="value"&&!(e.matches("input[type=button],input[type=submit]")))return;let v=e.getAttribute?e.getAttribute(a):void 0;if(v==null&&a in e)v=e[a];const t=R(v);if(t){if(e.setAttribute)e.setAttribute(a,t);try{if(a in e)e[a]=t}catch{}}}catch{}})});document.querySelectorAll("a").forEach(e=>{try{if(H(e))return;const r=e.getBoundingClientRect(),txt=N(e.textContent);if(txt==="Claude"&&r.left<100&&r.top<100)e.style.visibility="hidden"}catch{}})}catch{}}
+function T(){try{const b=document.body||document.documentElement;if(!b)return;const w=document.createTreeWalker(b,NodeFilter.SHOW_TEXT,{acceptNode(n){const p=n.parentElement;if(!p||X.has(p.tagName)||p.closest('[contenteditable],'+C)||Q(n)||K(n)||!R(n.nodeValue))return NodeFilter.FILTER_REJECT;return NodeFilter.FILTER_ACCEPT}});let n;while(n=w.nextNode()){const v=R(n.nodeValue);if(v)n.nodeValue=v}document.querySelectorAll("[role=dialog] p,[role=dialog] div,[role=dialog] span").forEach(e=>{try{if(e.closest("button,[contenteditable],"+C)||H(e)||K(e)||e.querySelector('a,button,input,textarea,select,[role=button],[contenteditable]'))return;const t=R(e.textContent);if(t&&N(e.textContent)!==N(t))e.textContent=t}catch{}});document.querySelectorAll("[aria-label],[title],[placeholder],input,textarea").forEach(e=>{["aria-label","title","placeholder","value"].forEach(a=>{try{if(e.closest(C)||Q(e)||K(e))return;if(a==="value"&&!(e.matches("input[type=button],input[type=submit]")))return;let v=e.getAttribute?e.getAttribute(a):void 0;if(v==null&&a in e)v=e[a];const t=R(v);if(t){if(e.setAttribute)e.setAttribute(a,t);try{if(a in e)e[a]=t}catch{}}}catch{}})});document.querySelectorAll("a").forEach(e=>{try{if(H(e))return;const r=e.getBoundingClientRect(),txt=N(e.textContent);if(txt==="Claude"&&r.left<100&&r.top<100)e.style.visibility="hidden"}catch{}})}catch{}}
 T();
 new MutationObserver(()=>{clearTimeout(window.__claudeZhDomTimer);window.__claudeZhDomTimer=setTimeout(T,30)}).observe(document.documentElement,{subtree:true,childList:true,characterData:true,attributes:true});
-}catch(e){}})()
+}catch(e){throw e}})()
 '@
-    return $template.Replace("__LANGUAGE__", $languageJson).Replace("__MAPPING__", $mappingJson).Replace("__SELECTED_TEXT__", $selectedTextJson).Replace("__DELETE_SELECTED_TEXT__", $deleteSelectedTextJson).Replace("__UPDATED_MINUTE_TEXT__", $updatedMinuteTextJson).Replace("__UPDATED_HOUR_TEXT__", $updatedHourTextJson).Replace("__UPDATED_DAY_TEXT__", $updatedDayTextJson).Replace("__UPDATED_WEEK_TEXT__", $updatedWeekTextJson).Replace("__UPDATED_MONTH_TEXT__", $updatedMonthTextJson).Replace("__UPDATED_YEAR_TEXT__", $updatedYearTextJson).Replace("__AGO_SECOND__", $agoSecondTextJson).Replace("__AGO_MINUTE__", $agoMinuteTextJson).Replace("__AGO_HOUR__", $agoHourTextJson).Replace("__AGO_DAY__", $agoDayTextJson).Replace("__AGO_WEEK__", $agoWeekTextJson).Replace("__ADDED_MINUTE__", $addedMinuteTextJson).Replace("__ADDED_HOUR__", $addedHourTextJson).Replace("__ADDED_DAY__", $addedDayTextJson).Replace("__ADDED_WEEK__", $addedWeekTextJson).Replace("__ADDED_MONTH__", $addedMonthTextJson).Replace("__ADDED_YEAR__", $addedYearTextJson).Replace("__ADDED_MONTH_RULES__", $addedMonthRulesJson)
+    return $template.Replace("__LANGUAGE__", $languageJson).Replace("__MAPPING__", $mappingJson).Replace("__SELECTED_TEXT__", $selectedTextJson).Replace("__DELETE_SELECTED_TEXT__", $deleteSelectedTextJson).Replace("__UPDATED_MINUTE_TEXT__", $updatedMinuteTextJson).Replace("__UPDATED_HOUR_TEXT__", $updatedHourTextJson).Replace("__UPDATED_DAY_TEXT__", $updatedDayTextJson).Replace("__UPDATED_WEEK_TEXT__", $updatedWeekTextJson).Replace("__UPDATED_MONTH_TEXT__", $updatedMonthTextJson).Replace("__UPDATED_YEAR_TEXT__", $updatedYearTextJson).Replace("__AGO_SECOND__", $agoSecondTextJson).Replace("__AGO_MINUTE__", $agoMinuteTextJson).Replace("__AGO_HOUR__", $agoHourTextJson).Replace("__AGO_DAY__", $agoDayTextJson).Replace("__AGO_WEEK__", $agoWeekTextJson).Replace("__ADDED_MINUTE__", $addedMinuteTextJson).Replace("__ADDED_HOUR__", $addedHourTextJson).Replace("__ADDED_DAY__", $addedDayTextJson).Replace("__ADDED_WEEK__", $addedWeekTextJson).Replace("__ADDED_MONTH__", $addedMonthTextJson).Replace("__ADDED_YEAR__", $addedYearTextJson).Replace("__ADDED_MONTH_RULES__", $addedMonthRulesJson).Replace("__LEGACY_MEMORY_MIGRATION_TEXT__", $legacyMemoryMigrationTextJson).Replace("__LEGACY_MEMORY_PREFIX_TEXT__", $legacyMemoryPrefixTextJson).Replace("__PAST_HOUR__", $pastHourTextJson).Replace("__PAST_DAY__", $pastDayTextJson).Replace("__PAST_WEEK__", $pastWeekTextJson).Replace("__PAST_MONTH__", $pastMonthTextJson).Replace("__PAST_YEAR__", $pastYearTextJson).Replace("__HIDE_SIDEBAR__", $hideSidebarShortcutTextJson).Replace("__SHOW_SIDEBAR__", $showSidebarShortcutTextJson).Replace("__DELETE_ITEMS_PERMANENTLY__", $deleteItemsPermanentlyTextJson).Replace("__DELETE_SELECTED_TITLE__", $deleteSelectedTitleJson).Replace("__DELETE_CHAT_TITLE__", $deleteChatTitleJson).Replace("__ORG_INFERENCE_TEXT__", $orgInferenceTextJson)
 }
 
 function Remove-ExistingOnlineDomTranslationPatch {
@@ -2433,7 +2579,14 @@ function Patch-HardcodedMainProcessMenuLabels {
                 @("mRXjxhS6p4", "检查更新…"),
                 @("4XmExNuKUb", "故障排除"),
                 @("XfMPtFNO8C", "获取支持"),
-                @("5DUIVR3fVi", "关于...")
+                @("5DUIVR3fVi", "关于..."),
+                @("WZe86KSdrM", "添加到词典"),
+                @("Teb1Zy/bzt", "在默认浏览器中打开链接"),
+                @("mhc+Y6yjMO", "复制链接地址"),
+                @("rY99UXvTDU", "复制图片"),
+                @("m6UMGDluaq", "复制图片地址"),
+                @("KETtxy51p+", "检查元素"),
+                @("qHPWFPPXPZ", "设置")
             )
         }
         "zh-TW" {
@@ -2820,16 +2973,10 @@ function Get-ModelPickerReplacementPairs {
     switch ($Language) {
         "zh-CN" {
             return @(
-                @("Higher effort means more thorough responses, but takes longer and uses your limits faster.", "更高的思考深度会带来更全面的回答，但耗时更久，也会更快消耗你的额度。"),
-                @("May use excessive tokens resulting in long response times and may hit token limits. Use sparingly for the hardest tasks.", "可能会消耗大量 token，导致响应时间很长，也可能触及 token 限制。请仅在最困难的任务中谨慎使用。"),
-                @("Most capable for ambitious work", "适合高难度工作的最强模型"),
-                @("1M context window", "100 万上下文窗口"),
-                @("name:`"Low`"", "name:`"低`""),
-                @("name:`"Medium`"", "name:`"中`""),
-                @("name:`"High`"", "name:`"高`""),
-                @("name:`"Extra`"", "name:`"极高`""),
-                @("name:`"Max`"", "name:`"最高`""),
-                @("message:`"Default`"", "message:`"默认`"")
+                @("Higher effort means more thorough responses, but takes longer and uses your limits faster.", "思考强度越高，回答越全面，但耗时更长，也会更快消耗用量额度。"),
+                @("May use excessive tokens resulting in long response times and may hit token limits. Use sparingly for the hardest tasks.", "可能消耗大量 token，导致响应时间延长，并触及 token 上限。请仅在最困难的任务中谨慎使用。"),
+                @("Most capable for ambitious work", "最擅长处理高难度任务"),
+                @("1M context window", "100 万 token 上下文窗口")
             )
         }
         "zh-TW" {
@@ -3559,22 +3706,39 @@ function Unsync-CCSwitchSkills {
     }
 }
 
-function Remove-LanguageFiles {
+function Get-LanguageFileTargets {
     param([string]$ResourcesPath)
 
-    $targets = @(
+    return @(
         (Join-Path $ResourcesPath "ion-dist\i18n\zh-CN.json"),
         (Join-Path $ResourcesPath "zh-CN.json"),
         (Join-Path $ResourcesPath "ion-dist\i18n\statsig\zh-CN.json"),
+        (Join-Path $ResourcesPath "ion-dist\i18n\dynamic\zh-CN.json"),
         (Join-Path $ResourcesPath "ion-dist\i18n\zh-TW.json"),
         (Join-Path $ResourcesPath "zh-TW.json"),
         (Join-Path $ResourcesPath "ion-dist\i18n\statsig\zh-TW.json"),
+        (Join-Path $ResourcesPath "ion-dist\i18n\dynamic\zh-TW.json"),
         (Join-Path $ResourcesPath "ion-dist\i18n\zh-HK.json"),
         (Join-Path $ResourcesPath "zh-HK.json"),
-        (Join-Path $ResourcesPath "ion-dist\i18n\statsig\zh-HK.json")
+        (Join-Path $ResourcesPath "ion-dist\i18n\statsig\zh-HK.json"),
+        (Join-Path $ResourcesPath "ion-dist\i18n\dynamic\zh-HK.json")
     )
+}
+
+function Remove-LanguageFiles {
+    param([string]$ResourcesPath)
+
+    $targets = @(Get-LanguageFileTargets $ResourcesPath)
+    $backup = Get-ChildItem -LiteralPath (Get-BackupRoot $ResourcesPath) -Directory -ErrorAction SilentlyContinue |
+        Sort-Object Name | Select-Object -First 1
+    $metadata = $null
+    if ($backup) {
+        $metadataPath = Join-Path $backup.FullName '.backup-metadata.json'
+        if (Test-Path -LiteralPath $metadataPath) { $metadata = Get-JsonObjectOrBackup $metadataPath }
+    }
 
     foreach ($target in $targets) {
+        if ($metadata -and @($metadata.createdFiles) -notcontains (Get-RelativeResourcePath $ResourcesPath $target)) { continue }
         Remove-Item $target -Force -ErrorAction SilentlyContinue
         if (-not (Test-Path $target)) {
             Write-Host "  removed: $target" -ForegroundColor Green
@@ -3788,9 +3952,9 @@ function Install-WindowsLanguagePack {
         Patch-LanguageDisplayNames $resourcesPath
         if (Test-OnlineAccountPatchEnabled) {
             Write-AsarCoworkSignatureWarning
-            Patch-OnlineDomTranslation $resourcesPath $pack $LanguageCode
             Patch-HardcodedMainProcessMenuLabels $resourcesPath $LanguageCode
             Patch-ModelPickerStrings $resourcesPath $LanguageCode
+            Patch-OnlineDomTranslation $resourcesPath $pack $LanguageCode
         } else {
             Write-Host "  skipping online claude.ai DOM translation patch (app.asar) due to patch mode: $PatchMode" -ForegroundColor DarkYellow
             Write-Host "  skipping main-process menu label patch (app.asar) due to patch mode: $PatchMode" -ForegroundColor DarkYellow

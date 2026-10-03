@@ -2,7 +2,11 @@
 
 给 Claude Desktop 换上简体中文界面。支持 Windows 和 macOS，支持官方订阅和第三方 API，可完整卸载恢复原样。
 
-补丁只修改本机 Claude Desktop 的界面资源文件，不触碰账号数据，也不改变推理请求的内容。
+本轮更新针对 **Windows、简体中文、官方订阅账号登录**：补齐 Chrome 设置和订阅用量页，修复动态时间、百分比及词表大小写匹配，并保留思考等级的英文名称。安装不需要配置第三方 API。
+
+**[下载当前修复源码 ZIP](https://github.com/Chrisutina/claude-desktop-zh-cn/archive/refs/heads/main.zip)**，解压后运行 `install-windows.bat`，选择 **2：官方账号登录模式（完整汉化）→ 1：简体中文**。重新安装后才会载入新词库，仅重启已有应用不会更新补丁。
+
+补丁修改本机界面资源和语言配置，不修改 Claude 服务端账号数据，也不改变推理请求内容。模式 `[2]` 还会改写应用文件及其完整性哈希，详见下文。
 
 ## 界面截图
 
@@ -14,14 +18,17 @@
 
 ## 汉化覆盖
 
-Claude Desktop 的界面文案分两层，分别存放在两个互不相干的目录里：
+界面翻译使用键值词库、模型动态词库和在线 DOM 映射：
 
-| 界面层 | 对应文件 | 覆盖情况 |
+| 界面层 | 随包资源 | 简体词条数 |
 |---|---|---|
-| 主进程（菜单栏、托盘、系统对话框） | `resources/<语言>.json` | 705 / 705 |
-| 渲染进程（应用内所有页面，**含设置界面**） | `ion-dist/i18n/<语言>.json` | 28,757 / 29,442 |
+| 应用页面和设置 | `frontend-zh-CN.json` | 31,067 |
+| 菜单、托盘和系统对话框 | `desktop-zh-CN.json` | 823 |
+| 模型说明和思考选项 | `dynamic-zh-CN.json` | 49 |
 
-未覆盖的 685 条经扫描确认没有被任何代码引用，属于旧版本遗留的死数据，不会出现在界面上。也就是说，当前版本**所有可见文案都已汉化**。
+这些是随包词条数量，不是当前客户端的覆盖率。安装时按目标版本英文词库合并，未覆盖的新键保留英文；在线页面也可能先于桌面客户端新增文案。具体修复和验证范围见 [Windows 官方订阅本地化说明](docs/windows-official-localization.md)。
+
+`Low / Medium / High / Extra / Max` 和 `Effort` 保留英文；模型说明提供中文。代码块、用户消息、输入内容和权限策略的数据值不参与显示层翻译。
 
 ## 安装模式
 
@@ -35,43 +42,21 @@ Claude Desktop 的界面文案分两层，分别存放在两个互不相干的�
 - 不含：在线页面汉化、模型选择器汉化、第三方模型名校验绕过
 - 用第三方 API 时，需要在网关或 CC Switch 中把模型名映射成 `claude-*` 风格的名称，否则推理配置无法保存
 
-### [2] 完整汉化
+### [2] 官方账号登录模式（完整汉化）
 
 改写 `app.asar`，并重算 `Claude.exe` 内嵌的完整性哈希。
 
 - 在 [1] 的基础上，额外汉化在线页面、主进程菜单、模型选择器
-- 绕过第三方模型名校验，模型名可以直接写 `deepseek-v4-pro` 这类名称
-- **Cowork 沙箱/工作区必不可用**（`Claude.exe` 签名失效）
+- 适合官方订阅账号登录后的在线界面；第三方模型名能否使用仍取决于客户端和网关的校验规则
+- Windows 上会改变 `Claude.exe` 的签名状态，可能使 Cowork VM 服务拒绝连接
 
-拿不准就选 `[1]`——它的汉化范围覆盖日常会用到的全部界面，而且不动签名。
+官方订阅登录后需要在线页面汉化时，选择 `[2]`。需要保留代码签名或依赖 Cowork 沙箱时，优先选择 `[1]`，该模式不包含在线 DOM 翻译。
 
 ## Cowork 沙箱/工作区说明
 
-Cowork 的 VM 沙箱要能用，必须**同时**满足两个条件，缺任何一个都不行：
+Cowork 的可用性取决于当前客户端、系统虚拟化条件和服务的签名校验。模式 `[2]` 改写 `app.asar` 并同步 `Claude.exe` 的哈希，会使 Authenticode 校验显示 `HashMismatch`；Cowork 服务可能因此报 `RPC pipe closed`。
 
-### 条件一：系统本身支持 Hyper-V
-
-Cowork 通过 `vmcompute.dll`（Hyper-V Host Compute Service）启动虚拟机。这个组件**只在 Windows 专业版 / 企业版 / 教育版提供，家庭版没有**。
-
-如果 `C:\Windows\System32\vmcompute.dll` 不存在，Cowork 永远不可用，**和是否打补丁无关**。日志（`C:\ProgramData\Claude\Logs\cowork-service.log`）里表现为：
-
-```
-[HCS] Warning: Failed to load vmcompute.dll: The specified module could not be found.
-[Cleanup] Warning: failed to enumerate HCN networks: HcnEnumerateNetworks failed with HRESULT 0x800706d9
-[VM] Stale VM scan failed, continuing without cleanup: HCS not initialized
-```
-
-很多「Cowork 用不了」的反馈其实是这一条——家庭版系统本来就跑不了。
-
-### 条件二：Claude 的签名未被破坏
-
-`cowork-svc.exe` 启动时会做签名校验（日志里的 `Signature verification initialized ... Enforce: true`）。模式 `[2]` 改写了 `app.asar` 并重算了 `Claude.exe` 的哈希，Authenticode 签名变成 `HashMismatch`，服务会拒绝客户端，典型报错是 `RPC pipe closed`。
-
-模式 `[1]` 不碰 `app.asar` 和 `Claude.exe`，这一条不会触发。
-
-### 结论
-
-想用 Cowork：系统要有 Hyper-V，并且用模式 `[1]`。
+模式 `[1]` 不修改这两个文件，但也不会修复系统本身的虚拟化或服务问题。需要 Cowork 时，选择 `[1]` 并分别排查客户端和系统条件。
 
 ## 适用环境
 
@@ -87,7 +72,7 @@ Cowork 通过 `vmcompute.dll`（Hyper-V Host Compute Service）启动虚拟机�
 1. 退出 Claude Desktop。
 2. 下载或克隆本项目。
 3. 双击 `install-windows.bat`，按 UAC 提示授权；脚本会先把安装文件复制到临时目录再以管理员身份运行。
-4. 选择安装模式（`1` 标准汉化 / `2` 完整汉化），详见上文「安装模式」。
+4. 选择安装模式；官方订阅账号的在线界面选择 `2` 官方账号登录模式，详见上文「安装模式」。
 5. 选择语言：`1` 简体中文、`2` 繁体中文（中国台湾）、`3` 繁体中文（中国香港）。
 6. 脚本会先尝试从旧备份恢复以清理上一轮汉化；没有旧备份时跳过并继续。
 7. 脚本会备份被修改的文件、写入中文资源并重启 Claude Desktop。
@@ -129,6 +114,7 @@ Cowork 通过 `vmcompute.dll`（Hyper-V Host Compute Service）启动虚拟机�
 - `resources/frontend-hardcoded-<语言>.json`：未走 i18n key 的硬编码文本映射，同时用于在线页面的 DOM 翻译表。
 - `resources/desktop-<语言>.json`：主进程壳层（菜单栏、托盘、对话框）翻译。
 - `resources/statsig-<语言>.json`：statsig i18n 兜底资源。
+- `resources/dynamic-zh-CN.json`：Windows 模型动态词库；按目标版本英文键合并，保留英文思考等级。
 - `resources/Localizable*.strings`：macOS 原生菜单资源。
 - `resources/release.json`：安装入口用来检查 GitHub Releases 是否有新版。
 
@@ -145,19 +131,17 @@ Cowork 通过 `vmcompute.dll`（Hyper-V Host Compute Service）启动虚拟机�
 7. 写入用户配置，把 `locale` 设为所选语言。
 8. 重启 Claude Desktop。
 
-**语言包合并**：两个平台都会把随包中文翻译与目标机器当前的 `en-US.json` 按 key 合并——已有译文用中文，Claude 新版新增而本包没有的 key 保留英文，本包里的过期 key 直接丢弃。这样界面永远不会因为缺字段而空白。
+**语言包合并**：随包中文翻译与目标机器当前的 `en-US.json` 按 key 合并，已有译文用中文，新增但未翻译的 key 保留英文，目标版本没有的旧键不写入应用。Windows 的动态模型词库也采用这个合并方式。
 
-`★ Insight ─────────────────────────────────────`
-这个合并步骤是补丁能跟上 Claude 快速迭代的关键。Claude 的界面文案 key 是 11 字符的 hash（如 `2GURQYNPp3`），每次更新都会新增和删除大量 key。如果直接把翻译文件覆盖过去，新版本里所有未翻译的 key 就会失去兜底；合并则保证「翻过的用中文、没翻过的用英文」，界面永远不会出现 hash 或空白。
-`─────────────────────────────────────────────────`
+**在线界面**：Windows 词表区分大小写，保留 `Extensions` 和 `EXTENSIONS` 等不同源文；数字、重置时间和到期日由动态规则处理。菜单、模型文案先处理，在线词表最后注入，避免后续替换损坏英文匹配键。
 
 **仅模式 `[2]` 会做的事**：
 
 - 改写 `app.asar`：注入在线账号页面的 DOM 翻译、主进程菜单汉化、模型选择器汉化。
-- 用等长替换关闭第三方网关的模型名校验。
+- macOS 完整模式还包含已有的第三方模型名校验补丁；这轮 Windows 本地化不更改模型路由。
 - Windows 上同步改写 `Claude.exe` 内嵌的完整性哈希。
 
-这三项都会改变被签名覆盖的文件内容，因此模式 `[2]` 必然导致签名失效。
+这些改动会改变被签名覆盖的文件内容。Windows 模式 `[2]` 不再具有原版文件的 Authenticode 签名状态。
 
 ## Claude 更新后
 
@@ -182,7 +166,7 @@ python scripts/translate_missing.py --merge      # 全量翻译并写回词表
 
 1. 自动探测已安装的 Claude Desktop（Windows 走 `Get-AppxPackage`，macOS 走 `/Applications/Claude.app`），读取它的 `en-US.json`；也可以用 `--app` 手动指定。
 2. 与 `resources/frontend-zh-CN.json` 比对，找出缺失的 key。
-3. 扫描应用的 JS bundle，**只保留被代码实际引用的 key**——没有任何代码引用的字符串永远不会出现在界面上，翻译它们是白费功夫。
+3. 扫描应用的 JS bundle，优先处理被本地代码引用的 key。在线订阅页面可能使用另一套 bundle，未在本地找到引用不能作为「不会显示」的证明，仍应按实际界面核对。
 4. 分批调用 Anthropic 兼容接口翻译，逐条校验 ICU 占位符、花括号结构和单引号。
 5. 校验不通过的自动退回单条重译。
 6. `--merge` 把通过校验的译文写回词表（原件备份为 `.bak`）。
@@ -215,11 +199,11 @@ export TRANSLATE_API_KEY=sk-...
 
 **Cowork 用不了？**
 
-见上文「Cowork 沙箱/工作区说明」——先看你的 Windows 是家庭版还是专业版。家庭版没有 Hyper-V，Cowork 无论如何都用不了。
+见上文「Cowork 沙箱/工作区说明」。先使用模式 `[1]` 保留签名，再分别检查系统虚拟化条件和服务日志。
 
 **第三方模型配置保存不了？**
 
-模式 `[1]` 不带模型名校验绕过。要么改用模式 `[2]`，要么在网关 / CC Switch 里把模型名映射成 `claude-*` 风格。
+先检查当前客户端允许的模型 ID 和网关路由。必要时在网关 / CC Switch 中配置别名；Windows 模式 `[2]` 的在线界面汉化不保证绕过模型名校验。
 
 **Windows 提示 `RPC pipe closed`？**
 
